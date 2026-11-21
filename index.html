@@ -132,6 +132,24 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .roster button[aria-pressed="true"]{background:var(--chalk);border-color:var(--chalk)}
 .roster button[aria-pressed="true"] b,.roster button[aria-pressed="true"] i{color:var(--wall-deep)}
 .roster button[aria-pressed="true"] em{color:var(--brass-deep)}
+.ctx{margin:0 0 4px;font-family:var(--f-num);font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--brass)}
+.ml{font-family:var(--f-num);font-weight:600;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--chalk-dim);font-variant-numeric:tabular-nums}
+.ml b{font-family:var(--f-chalk);font-weight:700;font-size:20px;letter-spacing:0;color:var(--brass);margin:0 10px 0 4px}
+.ttl{margin:0;font-family:var(--f-num);font-weight:800;font-size:clamp(40px,12vw,60px);line-height:.9;text-transform:uppercase;text-wrap:balance}
+.note{margin:0;font-family:var(--f-chalk);font-size:22px;line-height:1.25;color:var(--chalk)}
+.note:empty{display:none}
+.rnd{display:flex;flex-direction:column;gap:8px}
+.rnd h3{margin:6px 0 0;font-family:var(--f-num);font-weight:700;font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--chalk-dim)}
+.ms{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.mc{border-radius:10px;border:1px solid rgba(236,232,220,.12);background:rgba(236,232,220,.04);padding:4px 0}
+.mc.next{border-color:var(--brass);background:rgba(212,166,79,.1)}
+.mr{display:flex;align-items:center;gap:8px;padding:5px 12px;font-family:var(--f-num);font-weight:600;font-size:17px;color:var(--chalk-dim)}
+.mr span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mr b{font-family:var(--f-chalk);font-size:21px;font-weight:700;min-width:14px;text-align:right;font-variant-numeric:tabular-nums}
+.mr.w{color:var(--chalk)}
+.mr.w b{color:var(--brass)}
+.mr.l{opacity:.5}
+.mr.you span::after{content:" ●";color:var(--p1);font-size:.7em;vertical-align:middle}
 .how{margin:4px 0 0;font-size:14px;line-height:1.5;color:var(--chalk-dim)}
 .eyebrow{margin:0;font-family:var(--f-num);font-weight:700;font-size:15px;letter-spacing:.2em;text-transform:uppercase;color:var(--brass)}
 #winName{margin:0;font-family:var(--f-num);font-weight:800;font-size:clamp(48px,15vw,76px);line-height:.9;text-transform:uppercase;text-wrap:balance}
@@ -146,6 +164,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 <body>
 <div id="app">
   <header class="chalkboard">
+    <p class="ctx" id="ctx" hidden></p>
     <div class="players" id="players"></div>
     <div class="out" id="out"></div>
   </header>
@@ -177,11 +196,40 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
       <div class="seg" data-k="hand"><button data-v="steady">Steady</button><button data-v="normal">Normal</button><button data-v="pints">Few pints</button></div></div>
     <div class="opt"><span class="lab">Sound</span>
       <div class="seg" data-k="sound"><button data-v="off">Off</button><button data-v="darts">Darts</button><button data-v="crowd">+ Crowd</button><button data-v="caller">+ Caller</button></div></div>
+    <div class="opt" id="lenOpt"><span class="lab">Length</span>
+      <div class="seg" data-k="length"><button data-v="leg">Single leg</button><button data-v="match">Match · best of 3 sets</button></div></div>
     <button class="go" id="start">Step up to the oche</button>
+    <button class="ghost" id="tourBtn">Tournament</button>
     <button class="ghost" id="resume" hidden>Resume game</button>
     <div class="opt"><span class="lab">Preview celebrations</span>
       <div class="seg" id="preview"><button data-t="100">Ton</button><button data-t="140">140</button><button data-t="180">180</button></div></div>
     <p class="how">Press and hold anywhere on the board area. The aiming ring floats above your thumb and drifts like a real hand, and it gets shakier the longer you hold. Let go to throw. 501 and 301 must finish on a double or the bull.</p>
+  </div>
+</section>
+
+<section class="sheet" id="tourSetup" hidden>
+  <div class="sheet-in">
+    <p class="eyebrow">Tournament</p>
+    <h2 class="ttl">Make the draw</h2>
+    <div class="opt"><span class="lab">Players in the draw</span>
+      <div class="seg" data-k="tsize"><button data-v="4">4</button><button data-v="8">8</button><button data-v="16">16</button></div></div>
+    <div class="opt"><span class="lab">Humans</span>
+      <div class="seg" data-k="thumans"><button data-v="1">Just me</button><button data-v="2">Two of us</button></div></div>
+    <p class="how">Straight knockout. Every match is best of 3 sets, and each set is best of 5 legs, with the throw alternating each leg. The rest of the field are the pros, each playing to their real average. Matches between two pros are played out off-stage. The game is 501, or 301 if you picked it on the main menu.</p>
+    <button class="go" id="tStart">Make the draw</button>
+    <button class="ghost" id="tBack">Back</button>
+  </div>
+</section>
+
+<section class="sheet" id="tour" hidden>
+  <div class="sheet-in" style="max-width:640px">
+    <p class="eyebrow" id="tEyebrow"></p>
+    <h2 class="ttl" id="tTitle"></h2>
+    <p class="note" id="tNote"></p>
+    <div id="bracket" style="display:flex;flex-direction:column;gap:10px"></div>
+    <button class="go" id="tGo"></button>
+    <button class="ghost" id="tNew">New draw</button>
+    <button class="ghost" id="tMenu">Main menu</button>
   </div>
 </section>
 
@@ -522,7 +570,7 @@ function checkout(score, darts){
 }
 
 /* ---------- Settings ---------- */
-const DEFAULTS = { mode:"501", players:"cpu", cpu:"dittler", hand:"normal", sound:"crowd" };
+const DEFAULTS = { mode:"501", players:"cpu", cpu:"dittler", hand:"normal", sound:"crowd", length:"leg", tsize:"8", thumans:"1" };
 let settings = { ...DEFAULTS };
 try { const s = JSON.parse(localStorage.getItem("oche-settings")||"null"); if (s) settings = { ...DEFAULTS, ...s }; } catch(e){}
 function saveSettings(){ try { localStorage.setItem("oche-settings", JSON.stringify(settings)); } catch(e){} }
@@ -902,18 +950,24 @@ const gauss = () => { let u=0,v=0; while(!u) u=Math.random(); while(!v) v=Math.r
 const cur = () => G.players[G.cur];
 const isX01 = () => G.mode !== "atc";
 
+const LEGS_TO_WIN = 3, SETS_TO_WIN = 2;
 function newGame(){
-  token++;
-  const start = settings.mode === "atc" ? 1 : Number(settings.mode);
-  const mk = (name, cpu, i) => ({ name, cpu, col: i===0 ? "var(--p1)" : "var(--p2)", raw: i===0 ? "#e8483b" : "#3fa7f2",
-    score:start, target:1, darts:0, points:0, hits:0, history:[] });
   const ps = [];
-  if (settings.players === "solo") ps.push(mk("You", false, 0));
-  else if (settings.players === "cpu") ps.push(mk("You", false, 0), mk(OPP[settings.cpu].name, true, 1));
-  else ps.push(mk("Player 1", false, 0), mk("Player 2", false, 1));
-  G = { mode: settings.mode, players: ps, cur: 0, turn: [], turnStart: 0, locked: true, over: false, sigma: spreadFor(OPP[settings.cpu].avg), oppAvg: OPP[settings.cpu].avg };
+  if (settings.players === "solo") ps.push({ name:"You" });
+  else if (settings.players === "cpu") ps.push({ name:"You" }, { name: OPP[settings.cpu].name, cpu:true, avg: OPP[settings.cpu].avg });
+  else ps.push({ name:"Player 1" }, { name:"Player 2" });
+  startMatch({ mode: settings.mode, players: ps, match: settings.length === "match" && ps.length > 1 && settings.mode !== "atc" });
+}
+function startMatch(spec){
+  token++; aim = null; cpuAim = null; flight = null;
+  const start = spec.mode === "atc" ? 1 : Number(spec.mode);
+  const players = spec.players.map((q, i) => ({ name: q.name, cpu: !!q.cpu, avg: q.avg || 0, sigma: q.cpu ? spreadFor(q.avg) : 0,
+    col: i===0 ? "var(--p1)" : "var(--p2)", raw: i===0 ? "#e8483b" : "#3fa7f2",
+    score:start, target:1, darts:0, points:0, hits:0, history:[], legs:0, sets:0 }));
+  G = { mode: spec.mode, start, players, cur:0, starter:0, turn:[], turnStart:0, locked:true, over:false,
+    match: !!spec.match, label: spec.label || "", onEnd: spec.onEnd || null, legNo:1, setNo:1 };
   buildBoardUI();
-  $("#win").hidden = true; $("#menu").hidden = true;
+  document.querySelectorAll(".sheet").forEach(el => el.hidden = true);
   startTurn();
 }
 
@@ -994,27 +1048,52 @@ function finish(p){
   if (isX01()){ p.points += total; callout("Game shot", G.turn.at(-1).hit.label + " out"); }
   else callout("Bull!", "Round the board");
   celebrateTurn(Math.max(140, total));
-  react("game"); call("Game shot, and the leg!", true); buzz([30,50,30,50,30]);
+  const wi = G.players.indexOf(p);
+  let setWon = false, matchWon = !G.match;
+  if (G.match){ p.legs++; if (p.legs >= LEGS_TO_WIN){ p.sets++; setWon = true; } if (p.sets >= SETS_TO_WIN) matchWon = true; }
+  react("game"); buzz([30,50,30,50,30]);
+  call(G.match && matchWon ? "Game shot, and the match!" : setWon ? "Game shot, and the set!" : "Game shot, and the leg!", true);
+  updateUI();
   const tk = token;
   setTimeout(() => {
     if (tk !== token) return;
-    $("#winName").textContent = G.players.length > 1 ? (p.name === "You" ? "You win" : p.name + " wins") : "Checked out";
-    $("#winStats").textContent = isX01()
-      ? `${p.darts} darts · ${(p.points / p.darts * 3).toFixed(1)} average`
-      : `${p.darts} darts · ${Math.round(p.hits / p.darts * 100)}% hit rate`;
-    $("#win").hidden = false;
+    if (matchWon) return endMatch(wi);
+    if (setWon) callout("Set", "to " + p.name);
+    else callout(G.players.map(q => q.legs).join("–"), "Legs · set " + G.setNo);
+    setTimeout(() => { if (tk === token) nextLeg(setWon); }, 1600);
   }, 1700);
+}
+function nextLeg(setWon){
+  if (setWon){ G.players.forEach(q => q.legs = 0); G.setNo++; G.legNo = 1; } else G.legNo++;
+  G.players.forEach(q => { q.score = G.start; q.target = 1; q.history = []; });
+  G.starter = (G.starter + 1) % G.players.length;
+  G.cur = G.starter; G.over = false; G.turn = [];
+  startTurn();
+}
+const matchAvg = q => q.darts ? q.points / q.darts * 3 : 0;
+function endMatch(wi){
+  const p = G.players[wi];
+  if (G.onEnd) return G.onEnd(wi, G.players.map(q => q.sets), G.players.map(matchAvg));
+  $("#winName").textContent = G.players.length > 1 ? (p.name === "You" ? "You win" : p.name + " wins") : "Checked out";
+  const sets = G.match ? `Sets ${G.players.map(q => q.sets).join("–")} · ` : "";
+  $("#winStats").textContent = isX01()
+    ? `${sets}${p.darts} darts · ${matchAvg(p).toFixed(1)} average`
+    : `${p.darts} darts · ${Math.round(p.hits / p.darts * 100)}% hit rate`;
+  $("#win").hidden = false;
 }
 
 /* ---------- CPU ---------- */
 function cpuTarget(){
   const p = cur();
   if (!isX01()) return p.target === 21 ? aimPoint(25, 2) : aimPoint(p.target, 1);
-  const left = 3 - G.turn.length, co = checkout(p.score, left);
+  return targetFor(p.score, 3 - G.turn.length);
+}
+function targetFor(score, left){
+  const co = checkout(score, left);
   if (co) return aimPoint(co[0].n, co[0].m);
-  if (p.score - 60 >= 2 && p.score > 60) return aimPoint(20, 3);
-  for (const leave of [40,32,36,24,16,20,8,12,4,2]){ const s = p.score - leave; if (s >= 1 && s <= 20) return aimPoint(s, 1); }
-  if (p.score - 57 >= 2) return aimPoint(19, 3);
+  if (score - 60 >= 2 && score > 60) return aimPoint(20, 3);
+  for (const leave of [40,32,36,24,16,20,8,12,4,2]){ const s = score - leave; if (s >= 1 && s <= 20) return aimPoint(s, 1); }
+  if (score - 57 >= 2) return aimPoint(19, 3);
   return aimPoint(1, 1);
 }
 function cpuThrow(tk){
@@ -1026,7 +1105,7 @@ function cpuThrow(tk){
   setTimeout(() => {
     if (tk !== token || G.over) return;
     cpuAim = null;
-    throwDart(t.x, t.y, G.sigma);
+    throwDart(t.x, t.y, cur().sigma);
   }, 820);
 }
 
@@ -1046,7 +1125,7 @@ function aimMm(now){
   const [sx, sy] = sway(now/1000, (now - aim.t0)/1000);
   return [mx + sx, my + sy];
 }
-const canThrow = () => G && !G.over && !G.locked && !flight && !cur().cpu && G.turn.length < 3 && $("#menu").hidden && $("#win").hidden;
+const canThrow = () => G && !G.over && !G.locked && !flight && !cur().cpu && G.turn.length < 3 && [...document.querySelectorAll(".sheet")].every(el => el.hidden);
 function local(e){ const r = stage.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
 stage.addEventListener("pointerdown", e => {
   audioOn();
@@ -1142,7 +1221,7 @@ function buildBoardUI(){
   const wrap = $("#players"); wrap.innerHTML = "";
   G.players.forEach((p, i) => {
     const el = document.createElement("div"); el.className = "pl"; el.id = "pl" + i;
-    el.innerHTML = `<div class="nm"><span class="dot" style="background:${p.col}"></span><span></span></div>
+    el.innerHTML = `<div class="nm"><span class="dot" style="background:${p.col}"></span><span></span></div>${G.match ? '<div class="ml"></div>' : ""}
       <div class="row"><div class="sc"></div><div class="hist"></div></div><div class="meta"></div>`;
     el.querySelector(".nm span:last-child").textContent = p.name;
     wrap.appendChild(el);
@@ -1154,17 +1233,21 @@ function updateUI(){
     const el = $("#pl" + i);
     el.classList.toggle("on", i === G.cur && !G.over);
     el.classList.toggle("idle", G.players.length > 1 && i !== G.cur && !G.over);
+    if (G.match) el.querySelector(".ml").innerHTML = `Sets<b>${p.sets}</b>Legs<b>${p.legs}</b>`;
     if (isX01()){
       el.querySelector(".sc").textContent = p.score;
       el.querySelector(".hist").innerHTML = p.history.slice(-3).map(h => `<s>${h}</s>`).join("");
       const avg = p.darts ? (p.points / p.darts * 3).toFixed(1) : "0.0";
-      el.querySelector(".meta").textContent = p.cpu ? `Avg ${avg} · plays to ${G.oppAvg}` : `Avg ${avg} · ${p.darts} darts`;
+      el.querySelector(".meta").textContent = p.cpu ? `Avg ${avg} · plays to ${p.avg}` : `Avg ${avg} · ${p.darts} darts`;
     } else {
       el.querySelector(".sc").innerHTML = p.target > 21 ? "Done" : `<small>next</small>${p.target === 21 ? "Bull" : p.target}`;
       el.querySelector(".hist").innerHTML = "";
       el.querySelector(".meta").textContent = `${p.hits} hits · ${p.darts} darts`;
     }
   });
+  const ctx = $("#ctx");
+  ctx.hidden = !G.match;
+  if (G.match) ctx.textContent = `${G.label ? G.label + " · " : ""}Set ${G.setNo} · Leg ${G.legNo} · ${G.players[G.starter].name} threw first`;
   const p = cur();
   let out = "";
   if (isX01() && !G.over){
@@ -1192,6 +1275,8 @@ function syncMenu(){
   });
   $("#cpuOpt").hidden = settings.players !== "cpu";
   $("#resume").hidden = !(G && !G.over);
+  $("#lenOpt").hidden = settings.players === "solo" || settings.mode === "atc";
+  $("#tourBtn").textContent = T && T.champion === null ? "Continue tournament" : "Tournament";
 }
 document.querySelectorAll(".seg[data-k]").forEach(seg => seg.addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
@@ -1213,6 +1298,125 @@ $("#resume").addEventListener("click", () => { $("#menu").hidden = true; });
 $("#menuBtn").addEventListener("click", () => { aim = null; syncMenu(); $("#menu").hidden = false; });
 $("#again").addEventListener("click", () => { audioOn(); newGame(); });
 $("#toMenu").addEventListener("click", () => { $("#win").hidden = true; syncMenu(); $("#menu").hidden = false; });
+
+/* ---------- Tournament ---------- */
+let T = null;
+try { T = JSON.parse(localStorage.getItem("oche-tour") || "null"); } catch(e){}
+function saveT(){ try { localStorage.setItem("oche-tour", JSON.stringify(T)); } catch(e){} }
+const shuffle = a => { for (let i=a.length-1;i>0;i--){ const j = Math.random()*(i+1)|0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const roundName = n => n === 2 ? "Final" : n === 4 ? "Semi-finals" : n === 8 ? "Quarter-finals" : "Last 16";
+const isHuman = i => !T.ents[i].cpu;
+
+function newTournament(){
+  const size = Number(settings.tsize), humans = Number(settings.thumans);
+  const ents = humans === 1 ? [{ name:"You" }] : [{ name:"Player 1" }, { name:"Player 2" }];
+  const pros = shuffle(OPPONENTS.filter(o => o.avg >= 85)), club = OPPONENTS.filter(o => o.avg < 85);
+  const field = pros.concat(club).slice(0, size - humans);
+  field.forEach(o => ents.push({ name:o.name, nick:o.nick, avg:o.avg, cpu:true }));
+  shuffle(ents);
+  if (humans === 2){
+    const h = ents.map((e, i) => e.cpu ? -1 : i).filter(i => i >= 0), half = size/2;
+    if (Math.floor(h[0]/half) === Math.floor(h[1]/half)){ const j = (h[1] + half) % size; [ents[h[1]], ents[j]] = [ents[j], ents[h[1]]]; }
+  }
+  const r0 = []; for (let k=0;k<size;k+=2) r0.push({ a:k, b:k+1, w:null, sets:null });
+  T = { mode: settings.mode === "atc" ? "501" : settings.mode, size, ents, rounds:[r0], champion:null, note:"" };
+  advanceT(); saveT(); showTour();
+}
+
+/* Off-stage matches: the same aim model and tactics as on the board, minus the animation. */
+function simLeg(sig, starter, start){
+  const sc = [start, start]; let who = starter;
+  for (let v=0; v<600; v++){
+    const st = sc[who];
+    for (let i=0;i<3;i++){
+      const t = targetFor(sc[who], 3 - i), h = scoreAt(t.x + gauss()*sig[who], t.y + gauss()*sig[who]), ns = sc[who] - h.v;
+      if (ns < 0 || ns === 1 || (ns === 0 && h.m !== 2)){ sc[who] = st; break; }
+      sc[who] = ns; if (!ns) return who;
+    }
+    who = 1 - who;
+  }
+  return sc[0] <= sc[1] ? 0 : 1;
+}
+function simMatch(m){
+  const sig = [T.ents[m.a], T.ents[m.b]].map(e => spreadFor(e.avg)), sets = [0,0];
+  let starter = 0;
+  while (sets[0] < SETS_TO_WIN && sets[1] < SETS_TO_WIN){
+    const legs = [0,0];
+    while (legs[0] < LEGS_TO_WIN && legs[1] < LEGS_TO_WIN){ legs[simLeg(sig, starter, Number(T.mode))]++; starter = 1 - starter; }
+    sets[legs[0] > legs[1] ? 0 : 1]++;
+  }
+  m.sets = sets; m.w = sets[0] > sets[1] ? m.a : m.b;
+}
+function advanceT(){
+  for (;;){
+    const r = T.rounds[T.rounds.length - 1];
+    r.forEach(m => { if (m.w === null && !isHuman(m.a) && !isHuman(m.b)) simMatch(m); });
+    if (r.some(m => m.w === null)) return;
+    if (r.length === 1){ T.champion = r[0].w; return; }
+    const next = []; for (let k=0;k<r.length;k+=2) next.push({ a:r[k].w, b:r[k+1].w, w:null, sets:null });
+    T.rounds.push(next);
+  }
+}
+const pendingHuman = () => T && T.champion === null ? T.rounds[T.rounds.length - 1].find(m => m.w === null) : null;
+const humansLeft = () => T.rounds[T.rounds.length - 1].some(m => isHuman(m.a) || isHuman(m.b)) && T.champion === null;
+
+function showTour(){
+  document.querySelectorAll(".sheet").forEach(el => el.hidden = true);
+  const last = T.rounds[T.rounds.length - 1], next = pendingHuman();
+  $("#tEyebrow").textContent = `Tournament · ${T.mode} · ${T.size} players`;
+  $("#tTitle").textContent = T.champion !== null ? "Champion" : roundName(last.length*2);
+  $("#tNote").textContent = T.champion !== null ? `${T.ents[T.champion].name} lifts the trophy.` + (T.note ? " " + T.note : "") : T.note;
+  const row = (m, side) => {
+    const i = m[side], e = T.ents[i], won = m.w === i, lost = m.w !== null && !won;
+    const sc = m.sets ? m.sets[side === "a" ? 0 : 1] : "";
+    return `<div class="mr${won ? " w" : ""}${lost ? " l" : ""}${e.cpu ? "" : " you"}"><span>${e.name}</span><b>${sc}</b></div>`;
+  };
+  $("#bracket").innerHTML = T.rounds.map((r, k) => ({ r, k })).reverse().map(({ r }) =>
+    `<div class="rnd"><h3>${roundName(r.length*2)}</h3><div class="ms">${r.map(m =>
+      `<div class="mc${m === next ? " next" : ""}">${row(m, "a")}${row(m, "b")}</div>`).join("")}</div></div>`).join("");
+  const go = $("#tGo");
+  if (T.champion !== null) go.textContent = "New tournament";
+  else if (next) go.textContent = `Play: ${T.ents[next.a].name} v ${T.ents[next.b].name}`;
+  else go.textContent = "Play out the rest";
+  $("#tour").hidden = false;
+  $("#tour").scrollTop = 0;
+}
+function playTourMatch(m){
+  const ea = T.ents[m.a], eb = T.ents[m.b];
+  const rn = roundName(T.rounds[T.rounds.length - 1].length*2);
+  startMatch({ mode: T.mode, match: true, label: rn,
+    players: [ea, eb].map(e => ({ name: e.name, cpu: !!e.cpu, avg: e.avg })),
+    onEnd: (wi, sets, avgs) => {
+      m.w = wi === 0 ? m.a : m.b; m.sets = sets;
+      const w = T.ents[m.w], l = T.ents[wi === 0 ? m.b : m.a], hs = sets.slice().sort((x, y) => y - x).join("–");
+      T.note = w.cpu && !l.cpu ? `${w.name} knocks ${l.name === "You" ? "you" : l.name} out, ${hs}. Your average: ${avgs[wi === 0 ? 1 : 0].toFixed(1)}.`
+        : `${w.name === "You" ? "You beat" : w.name + " beats"} ${l.name}, ${hs}. Average ${avgs[wi].toFixed(1)}.`;
+      advanceT(); saveT();
+      if (T.champion !== null && !T.ents[T.champion].cpu){
+        const r = stage.getBoundingClientRect(); window.FX.celebrate(3, r.left + CX, r.top + CY, R.dOut*S);
+        callout("Champion", T.ents[T.champion].name === "You" ? "The trophy is yours" : T.ents[T.champion].name, "max");
+        react(180); call("And your champion!", true); shake = 4;
+        const tk = token; setTimeout(() => { if (tk === token) showTour(); }, 4800);
+      } else { showTour(); if (!w.cpu) react(140); }
+    } });
+}
+$("#tourBtn").addEventListener("click", () => {
+  audioOn();
+  if (T && T.champion === null) showTour();
+  else { document.querySelectorAll(".sheet").forEach(el => el.hidden = true); syncMenu(); $("#tourSetup").hidden = false; }
+});
+$("#tStart").addEventListener("click", () => { audioOn(); newTournament(); });
+$("#tBack").addEventListener("click", () => { $("#tourSetup").hidden = true; syncMenu(); $("#menu").hidden = false; });
+$("#tNew").addEventListener("click", () => { $("#tour").hidden = true; syncMenu(); $("#tourSetup").hidden = false; });
+$("#tMenu").addEventListener("click", () => { $("#tour").hidden = true; syncMenu(); $("#menu").hidden = false; });
+$("#tGo").addEventListener("click", () => {
+  audioOn();
+  if (T.champion !== null){ $("#tour").hidden = true; syncMenu(); $("#tourSetup").hidden = false; return; }
+  const m = pendingHuman();
+  if (m && (isHuman(m.a) || isHuman(m.b))) return playTourMatch(m);
+  while (T.champion === null){ const p = pendingHuman(); if (p) simMatch(p); advanceT(); }
+  saveT(); showTour();
+});
 
 /* ---------- Boot ---------- */
 new ResizeObserver(resize).observe(stage);
