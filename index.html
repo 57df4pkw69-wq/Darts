@@ -73,6 +73,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     radial-gradient(closest-side at 50% 48%, rgba(212,166,79,.10), transparent 75%),
     radial-gradient(140% 100% at 50% 40%, var(--wall) 0%, var(--wall-deep) 100%)}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block}
+#fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:15}
 .hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
   padding:8px 14px;border-radius:999px;background:rgba(10,17,14,.75);border:1px solid rgba(212,166,79,.35);
   font-family:var(--f-num);font-weight:500;font-size:15px;letter-spacing:.06em;color:var(--chalk);white-space:nowrap;pointer-events:none;transition:opacity .4s}
@@ -160,6 +161,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   </footer>
 </div>
 
+<canvas id="fx" aria-hidden="true"></canvas>
+
 <section class="sheet" id="menu">
   <div class="sheet-in">
     <h1 class="logo">The<br><em>Oche</em></h1>
@@ -174,6 +177,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
       <div class="seg" data-k="hand"><button data-v="steady">Steady</button><button data-v="normal">Normal</button><button data-v="pints">Few pints</button></div></div>
     <button class="go" id="start">Step up to the oche</button>
     <button class="ghost" id="resume" hidden>Resume game</button>
+    <div class="opt"><span class="lab">Preview celebrations</span>
+      <div class="seg" id="preview"><button data-t="100">Ton</button><button data-t="140">140</button><button data-t="180">180</button></div></div>
     <p class="how">Press and hold anywhere on the board area. The aiming ring floats above your thumb and drifts like a real hand, and it gets shakier the longer you hold. Let go to throw. 501 and 301 must finish on a double or the bull.</p>
   </div>
 </section>
@@ -188,6 +193,282 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   </div>
 </section>
 
+<script>
+/* ---------- WebGL effects: GPU point-sprite particles + shockwave/flash pass ---------- */
+window.FX = (() => {
+"use strict";
+const cvs = document.getElementById("fx");
+const noop = { land(){}, celebrate(){}, ok:false };
+let gl = null;
+try { gl = cvs.getContext("webgl", { alpha:true, premultipliedAlpha:true, antialias:false, depth:false, stencil:false }); } catch(e){}
+if (!gl) return noop;
+const REDUCE = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const Q = REDUCE ? .35 : 1; // particle budget multiplier
+
+/* shaders */
+const PVS = `
+attribute vec2 aPos; attribute float aSize; attribute float aRot; attribute vec4 aCol; attribute float aKind;
+uniform vec2 uRes;
+varying vec4 vCol; varying float vRot; varying float vKind;
+void main(){
+  vec2 c = aPos / uRes * 2.0 - 1.0;
+  gl_Position = vec4(c.x, -c.y, 0.0, 1.0);
+  gl_PointSize = aSize;
+  vCol = aCol; vRot = aRot; vKind = aKind;
+}`;
+const PFS = `
+precision mediump float;
+varying vec4 vCol; varying float vRot; varying float vKind;
+void main(){
+  vec2 p = gl_PointCoord * 2.0 - 1.0;
+  if (vKind < 0.5){                       // glowing spark, additive
+    float d = dot(p, p); if (d > 1.0) discard;
+    float g = exp(-d * 5.0) + 0.7 * exp(-d * 30.0);
+    gl_FragColor = vec4(vCol.rgb * g * vCol.a, 0.0);
+  } else if (vKind < 1.5){                // confetti: tumbling paper rectangle
+    float c = cos(vRot), s = sin(vRot);
+    vec2 q = vec2(c*p.x - s*p.y, s*p.x + c*p.y);
+    float flip = abs(sin(vRot * 1.7 + 0.5));
+    if (abs(q.x) > 0.15 + 0.55*flip || abs(q.y) > 0.42) discard;
+    float shade = 0.55 + 0.45 * flip;
+    gl_FragColor = vec4(vCol.rgb * shade * vCol.a, vCol.a);
+  } else {                                // sisal dust, soft alpha
+    float d = dot(p, p); if (d > 1.0) discard;
+    float a = vCol.a * (1.0 - d);
+    gl_FragColor = vec4(vCol.rgb * a, a);
+  }
+}`;
+const QVS = `attribute vec2 aQ; void main(){ gl_Position = vec4(aQ, 0.0, 1.0); }`;
+const QFS = `
+precision mediump float;
+uniform vec2 uRes; uniform vec4 uRing[6]; uniform vec4 uRingCol[6]; uniform vec4 uFlash; uniform vec2 uFlashAt;
+void main(){
+  vec2 f = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec3 col = vec3(0.0);
+  for (int i = 0; i < 6; i++){
+    vec4 r = uRing[i];
+    if (r.w > 0.0){
+      float d = length(f - r.xy) - r.z;
+      float g = exp(-d*d / (r.w*r.w));
+      float inner = d < 0.0 ? exp(d / (r.w*3.0)) * 0.25 : 0.0;   // faint fill trailing inside the wave
+      col += uRingCol[i].rgb * (g + inner) * uRingCol[i].a;
+    }
+  }
+  float fd = length(f - uFlashAt) / max(uRes.x, uRes.y);
+  col += uFlash.rgb * uFlash.a * (1.0 - smoothstep(0.0, 1.2, fd));
+  gl_FragColor = vec4(col, 0.0);
+}`;
+function sh(type, src){ const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+function prog(vs, fs){ const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; }
+let PP, QP;
+try { PP = prog(PVS, PFS); QP = prog(QVS, QFS); } catch(e){ return noop; }
+
+const MAX = 9000, STRIDE = 9;
+const vdata = new Float32Array(MAX * STRIDE);
+const vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo); gl.bufferData(gl.ARRAY_BUFFER, vdata.byteLength, gl.DYNAMIC_DRAW);
+const qbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, qbo); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const A = n => gl.getAttribLocation(PP, n);
+const loc = { pos:A("aPos"), size:A("aSize"), rot:A("aRot"), col:A("aCol"), kind:A("aKind"),
+  pres: gl.getUniformLocation(PP, "uRes"), q: gl.getAttribLocation(QP, "aQ"),
+  qres: gl.getUniformLocation(QP, "uRes"), ring: gl.getUniformLocation(QP, "uRing"), ringCol: gl.getUniformLocation(QP, "uRingCol"),
+  flash: gl.getUniformLocation(QP, "uFlash"), flashAt: gl.getUniformLocation(QP, "uFlashAt") };
+
+/* particle store (structure of arrays) */
+const F = () => new Float32Array(MAX);
+const X=F(),Y=F(),VX=F(),VY=F(),LIFE=F(),MAXL=F(),S0=F(),S1=F(),CR=F(),CG=F(),CB=F(),CA=F(),ROT=F(),VR=F(),KIND=F(),GRAV=F(),DRAG=F(),FLUT=F(),TW=F();
+let n = 0;
+function swap(i, j){ for (const a of [X,Y,VX,VY,LIFE,MAXL,S0,S1,CR,CG,CB,CA,ROT,VR,KIND,GRAV,DRAG,FLUT,TW]) a[i] = a[j]; }
+function spawn(o){
+  if (n >= MAX) return;
+  const i = n++;
+  X[i]=o.x; Y[i]=o.y; VX[i]=o.vx||0; VY[i]=o.vy||0; LIFE[i]=0; MAXL[i]=o.life;
+  S0[i]=o.s0; S1[i]=o.s1 ?? o.s0; CR[i]=o.c[0]; CG[i]=o.c[1]; CB[i]=o.c[2]; CA[i]=o.a ?? 1;
+  ROT[i]=o.rot ?? Math.random()*6.28; VR[i]=o.vr||0; KIND[i]=o.kind||0; GRAV[i]=o.g||0; DRAG[i]=o.drag ?? 1; FLUT[i]=o.flut||0; TW[i]=o.tw||0;
+}
+
+/* helpers */
+let W=1, H=1, DPR=1, U=1;
+const rnd = (a, b) => a + Math.random()*(b-a);
+function hsl(h, s, l){ const k = n => (n + h/30) % 12, a = s*Math.min(l, 1-l), f = n => l - a*Math.max(-1, Math.min(k(n)-3, 9-k(n), 1)); return [f(0), f(8), f(4)]; }
+const GOLD = [1, .78, .35], WHITE = [1, .97, .9];
+const CONFETTI = [[.91,.28,.23],[.83,.65,.31],[.12,.55,.33],[.25,.65,.95],[.95,.93,.86],[.95,.55,.2]];
+
+const rings = [], rockets = [], sched = [];
+let flash = null;
+function ring(x, y, col, r1, dur, w){ rings.push({ x, y, col, r1, dur, w, t:0 }); if (rings.length > 6) rings.shift(); }
+function at(delay, fn){ sched.push({ t: delay, fn }); }
+
+function burst(x, y, col, count, speed, opts={}){
+  count = Math.round(count*Q);
+  for (let i=0;i<count;i++){
+    const a = Math.random()*Math.PI*2, sp = speed * (opts.shell ? rnd(.82, 1) : Math.sqrt(Math.random()));
+    const c = opts.mix ? hsl(opts.mix[0] + rnd(-opts.mix[1], opts.mix[1]), .9, .62) : col;
+    spawn({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, life: rnd(.9, 1.7)*(opts.life||1), s0: rnd(5, 9)*DPR*(opts.size||1), s1: 1.5*DPR,
+      c, kind:0, g: 160*U, drag:.955, tw: Math.random() < .35 ? 1 : 0 });
+  }
+  spawn({ x, y, life:.28, s0: 150*DPR*(opts.size||1), s1: 40*DPR, c: col, a:.9, kind:0 });
+}
+function rocket(x0, y1, hue, delay){
+  at(delay, () => rockets.push({ x:x0, y:H+10*DPR, vx: rnd(-40,40)*U, vy: -Math.sqrt(2*420*U*(H - y1))*1.0, hue, ty:y1 }));
+}
+function cannon(x, y, ang, count, speed){
+  count = Math.round(count*Q);
+  for (let i=0;i<count;i++){
+    const a = ang + rnd(-.32, .32), sp = speed*rnd(.55, 1.1);
+    spawn({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, life: rnd(2.6, 4.2), s0: rnd(10, 16)*DPR, c: CONFETTI[i % CONFETTI.length],
+      kind:1, g: 520*U, drag:.955, flut: rnd(150, 320)*U, vr: rnd(-12, 12) });
+  }
+}
+function rain(count, dur){
+  count = Math.round(count*Q);
+  for (let i=0;i<count;i++) at(Math.random()*dur, () => spawn({ x: rnd(0, W), y: -20*DPR, vx: rnd(-30,30)*U, vy: rnd(80, 220)*U,
+    life: rnd(4, 6), s0: rnd(9, 15)*DPR, c: CONFETTI[(Math.random()*CONFETTI.length)|0], kind:1, g: 60*U, drag:.99, flut: rnd(120, 260)*U, vr: rnd(-9, 9) }));
+}
+function glitter(count, dur){
+  count = Math.round(count*Q);
+  for (let i=0;i<count;i++) at(Math.random()*dur, () => spawn({ x: rnd(0, W), y: rnd(0, H*.7), vx: rnd(-10,10)*U, vy: rnd(10, 60)*U,
+    life: rnd(.8, 1.8), s0: rnd(4, 8)*DPR, s1: 1*DPR, c: Math.random() < .6 ? GOLD : WHITE, kind:0, tw:1 }));
+}
+
+/* public: dart lands */
+function land(cx, cy, hit){
+  const x = cx*DPR, y = cy*DPR;
+  const big = hit.v === 50 || hit.m === 3 || hit.m === 2;
+  const tint = hit.v === 0 ? [.55,.5,.45] : hit.v === 50 ? [1,.35,.25] : hit.m === 3 ? GOLD : hit.m === 2 ? [.45,1,.6] : WHITE;
+  const dust = hit.v === 0 ? 10 : 18;
+  for (let i=0;i<dust;i++){
+    const a = rnd(-Math.PI, 0) + rnd(-.6,.6), sp = rnd(40, 190)*U;
+    spawn({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, life: rnd(.45, .85), s0: rnd(3, 6)*DPR, s1: 1*DPR,
+      c: Math.random() < .5 ? [.86,.78,.6] : [.35,.28,.2], a:.9, kind:2, g: 520*U, drag:.94 });
+  }
+  if (hit.v === 0) return;
+  const sparks = big ? 34 : 12;
+  for (let i=0;i<sparks;i++){
+    const a = Math.random()*Math.PI*2, sp = rnd(120, big ? 520 : 340)*U;
+    spawn({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, life: rnd(.22, big ? .7 : .45), s0: rnd(4, 8)*DPR, s1: 1*DPR, c: tint, kind:0, g: 380*U, drag:.92 });
+  }
+  spawn({ x, y, life:.18, s0: (big ? 90 : 50)*DPR, s1: 20*DPR, c: tint, a:.8, kind:0 });
+  ring(x, y, tint.map(v => v*(big ? .9 : .5)), (big ? 70 : 38)*U, big ? .45 : .32, 5*DPR);
+}
+
+/* public: turn celebrations. tier 1 = ton+, 2 = 140+, 3 = 180 */
+function celebrate(tier, bcx, bcy, br){
+  const cx = bcx*DPR, cy = bcy*DPR, R = br*DPR, diag = Math.hypot(W, H);
+  if (tier >= 1){
+    ring(cx, cy, [1,.75,.3], diag*.6, .9, 14*DPR);
+    burst(cx, cy - R*.55, GOLD, 170, 360*U, { shell:true });
+    cannon(0, H, -Math.PI/3, 110, 1050*U);
+    cannon(W, H, -Math.PI*2/3, 110, 1050*U);
+  }
+  if (tier >= 2){
+    if (!REDUCE) flash = { t:0, dur:.45, col:[1,.85,.55], str:.45, x:cx, y:cy };
+    at(.12, () => ring(cx, cy, [.9,.95,1], diag*.75, 1.1, 22*DPR));
+    rocket(W*.25, H*.22, 0, .15); rocket(W*.75, H*.2, 140, .4); rocket(W*.5, H*.12, 45, .7);
+    cannon(0, H*.7, -Math.PI/4, 130, 1150*U);
+    cannon(W, H*.7, -Math.PI*3/4, 130, 1150*U);
+  }
+  if (tier >= 3){
+    if (!REDUCE) flash = { t:0, dur:.9, col:[1,.95,.8], str:.9, x:cx, y:cy };
+    at(.3, () => ring(cx, cy, [1,.5,.3], diag*.9, 1.3, 30*DPR));
+    at(.55, () => ring(cx, cy, [.4,.9,1], diag*.9, 1.4, 26*DPR));
+    const hues = [0, 45, 140, 200, 300, 30, 0, 45, 160];
+    hues.forEach((h, i) => rocket(rnd(.12, .88)*W, rnd(.1, .35)*H, h, .9 + i*.28));
+    at(1.1, () => { cannon(0, H, -Math.PI/3, 160, 1250*U); cannon(W, H, -Math.PI*2/3, 160, 1250*U); });
+    at(2.0, () => { cannon(0, H*.6, -Math.PI/5, 120, 1100*U); cannon(W, H*.6, -Math.PI*4/5, 120, 1100*U); });
+    rain(650, 2.6);
+    glitter(380, 3.2);
+    at(.0, () => burst(cx, cy, WHITE, 260, 620*U, { shell:true, size:1.3, life:1.2 }));
+  }
+}
+
+/* sim + draw */
+function resize(){
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = Math.round(innerWidth*DPR); H = Math.round(innerHeight*DPR);
+  cvs.width = W; cvs.height = H; U = Math.min(W, H) / 400;
+}
+addEventListener("resize", resize); resize();
+
+function step(dt){
+  for (let k = sched.length - 1; k >= 0; k--){ sched[k].t -= dt; if (sched[k].t <= 0){ const s = sched[k]; sched.splice(k, 1); s.fn(); } }
+  for (let k = rockets.length - 1; k >= 0; k--){
+    const r = rockets[k];
+    r.vy += 420*U*dt; r.x += r.vx*dt; r.y += r.vy*dt;
+    spawn({ x:r.x, y:r.y, vx: rnd(-20,20)*U, vy: rnd(10,40)*U, life: rnd(.3,.6), s0: rnd(4,7)*DPR, s1: 1*DPR, c: hsl(r.hue + 20, .9, .75), kind:0 });
+    if (r.vy >= -30*U || r.y <= r.ty){
+      rockets.splice(k, 1);
+      burst(r.x, r.y, hsl(r.hue, .95, .65), 230, rnd(340, 460)*U, { shell: Math.random() < .6, mix:[r.hue, 25] });
+    }
+  }
+  for (let i = 0; i < n; i++){
+    LIFE[i] += dt;
+    if (LIFE[i] >= MAXL[i]){ n--; swap(i, n); i--; continue; }
+    const d = Math.pow(DRAG[i], dt*60);
+    VX[i] *= d; VY[i] = VY[i]*d + GRAV[i]*dt;
+    if (FLUT[i]) VX[i] += Math.sin(LIFE[i]*7 + i) * FLUT[i] * dt;
+    X[i] += VX[i]*dt; Y[i] += VY[i]*dt; ROT[i] += VR[i]*dt;
+  }
+  for (let k = rings.length - 1; k >= 0; k--){ rings[k].t += dt; if (rings[k].t >= rings[k].dur) rings.splice(k, 1); }
+  if (flash){ flash.t += dt; if (flash.t >= flash.dur) flash = null; }
+}
+
+const ringU = new Float32Array(24), ringC = new Float32Array(24);
+let wasActive = false, last = performance.now();
+function draw(now){
+  gl.viewport(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  if (rings.length || flash){
+    ringU.fill(0); ringC.fill(0);
+    rings.forEach((r, k) => {
+      const t = r.t / r.dur, e = 1 - Math.pow(1 - t, 3);
+      ringU.set([r.x, r.y, r.r1*e, r.w*(1 + t*2)], k*4);
+      ringC.set([...r.col, (1 - t)*(1 - t)], k*4);
+    });
+    gl.useProgram(QP);
+    gl.uniform2f(loc.qres, W, H);
+    gl.uniform4fv(loc.ring, ringU); gl.uniform4fv(loc.ringCol, ringC);
+    if (flash){ const t = flash.t/flash.dur; gl.uniform4f(loc.flash, ...flash.col, flash.str*Math.pow(1 - t, 2)); gl.uniform2f(loc.flashAt, flash.x, flash.y); }
+    else gl.uniform4f(loc.flash, 0, 0, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, qbo);
+    gl.enableVertexAttribArray(loc.q); gl.vertexAttribPointer(loc.q, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disableVertexAttribArray(loc.q);
+  }
+  if (n){
+    for (let i = 0, o = 0; i < n; i++, o += STRIDE){
+      const t = LIFE[i] / MAXL[i];
+      let a = CA[i];
+      if (KIND[i] === 1) a *= t > .8 ? (1 - t)/.2 : 1;
+      else a *= 1 - t*t;
+      if (TW[i]) a *= .45 + .55*Math.abs(Math.sin(LIFE[i]*28 + i));
+      vdata[o]=X[i]; vdata[o+1]=Y[i]; vdata[o+2]=S0[i] + (S1[i]-S0[i])*t; vdata[o+3]=ROT[i];
+      vdata[o+4]=CR[i]; vdata[o+5]=CG[i]; vdata[o+6]=CB[i]; vdata[o+7]=a; vdata[o+8]=KIND[i];
+    }
+    gl.useProgram(PP);
+    gl.uniform2f(loc.pres, W, H);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, vdata.subarray(0, n*STRIDE));
+    const B = STRIDE*4;
+    const attr = (l, size, off) => { gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, size, gl.FLOAT, false, B, off*4); };
+    attr(loc.pos, 2, 0); attr(loc.size, 1, 2); attr(loc.rot, 1, 3); attr(loc.col, 4, 4); attr(loc.kind, 1, 8);
+    gl.drawArrays(gl.POINTS, 0, n);
+  }
+}
+function loop(now){
+  const dt = Math.min(.05, (now - last)/1000); last = now;
+  step(dt);
+  const active = n > 0 || rings.length > 0 || flash || rockets.length > 0 || sched.length > 0;
+  if (active || wasActive) draw(now);
+  wasActive = active;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+return { land, celebrate, ok:true };
+})();
+</script>
 <script>
 (() => {
 "use strict";
@@ -499,6 +780,7 @@ function land(f){
   p.darts++;
   thunk(hit.v === 0); buzz(hit.v === 0 ? 8 : 18);
   if (hit.v) shake = 1;
+  { const [vx, vy] = toViewport(f.x, f.y); window.FX.land(vx, vy, hit); }
   let ended = false, bust = false, won = false;
 
   if (isX01()){
@@ -528,6 +810,7 @@ function endTurn(bust){
   if (isX01()){
     p.points += total;
     if (!bust && total > 0) p.history.push(G.turnStart);
+    if (!bust) celebrateTurn(total);
     if (bust) callout("Bust", "", "bust");
     else if (total === 180){ callout(NAMES[180], "", "max"); fanfare(); buzz([40,60,40,60,120]); }
     else if (total >= 100) callout(String(total), "Ton" + (total > 100 ? " plus" : ""));
@@ -549,6 +832,7 @@ function finish(p){
   const total = G.turn.reduce((a,d) => a + d.hit.v, 0);
   if (isX01()){ p.points += total; callout("Game shot", G.turn.at(-1).hit.label + " out"); }
   else callout("Bull!", "Round the board");
+  celebrateTurn(Math.max(140, total));
   fanfare(); buzz([30,50,30,50,30]);
   const tk = token;
   setTimeout(() => {
@@ -627,6 +911,14 @@ stage.addEventListener("contextmenu", e => e.preventDefault());
 
 /* ---------- Effects ---------- */
 function addPop(x, y, text, col){ pops.push({ x, y, text, col, t0: performance.now() }); }
+function toViewport(x, y){ const r = stage.getBoundingClientRect(), [px, py] = toPx(x, y); return [r.left + px, r.top + py]; }
+function celebrateTurn(total){
+  const tier = total === 180 ? 3 : total >= 140 ? 2 : total >= 100 ? 1 : 0;
+  if (!tier) return;
+  const r = stage.getBoundingClientRect();
+  window.FX.celebrate(tier, r.left + CX, r.top + CY, R.dOut*S);
+  shake = tier * 1.3;
+}
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 function callout(big, small, cls=""){
   const el = $("#callout");
@@ -733,17 +1025,27 @@ function updateUI(){
 /* ---------- Menu ---------- */
 $("#roster").innerHTML = OPPONENTS.map(o => `<button data-v="${o.id}"><b>${o.name}</b><i>${o.nick}</i><em>Avg ${o.avg}</em></button>`).join("");
 function syncMenu(){
-  document.querySelectorAll(".seg").forEach(seg => {
+  document.querySelectorAll(".seg[data-k]").forEach(seg => {
     const k = seg.dataset.k;
     seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === settings[k])));
   });
   $("#cpuOpt").hidden = settings.players !== "cpu";
   $("#resume").hidden = !(G && !G.over);
 }
-document.querySelectorAll(".seg").forEach(seg => seg.addEventListener("click", e => {
+document.querySelectorAll(".seg[data-k]").forEach(seg => seg.addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   settings[seg.dataset.k] = b.dataset.v; saveSettings(); syncMenu();
 }));
+$("#preview").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const t = Number(b.dataset.t);
+  audioOn(); $("#menu").hidden = true;
+  setTimeout(() => {
+    if (t === 180){ callout(NAMES[180], "", "max"); fanfare(); buzz([40,60,40,60,120]); }
+    else callout(String(t), t > 100 ? "Ton plus" : "Ton");
+    celebrateTurn(t);
+  }, 150);
+});
 $("#start").addEventListener("click", () => { audioOn(); newGame(); });
 $("#resume").addEventListener("click", () => { $("#menu").hidden = true; });
 $("#menuBtn").addEventListener("click", () => { aim = null; syncMenu(); $("#menu").hidden = false; });
