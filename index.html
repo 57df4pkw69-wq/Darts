@@ -324,12 +324,13 @@ function renderBoard(){
 
 /* ---------- Dart sprite ---------- */
 function drawDart(px, py, k, col, alpha=1, stuck=true){
-  const L = 52*S*k, ux = .26, uy = -.966, nx = -uy, ny = ux;
+  // Stuck darts point almost straight at the viewer, so they read short (foreshortened) with a near-vertical lean.
+  const L = (stuck ? 26 : 44)*S*k, ux = .07, uy = -.9975, nx = -uy, ny = ux;
   const P = (u, w) => [px + ux*L*u + nx*w, py + uy*L*u + ny*w];
   ctx.save(); ctx.globalAlpha = alpha; ctx.lineCap = "round";
   if (stuck){
     ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 3.2*S*k;
-    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + .1*L, py + .55*L); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + .05*L, py + .6*L); ctx.stroke();
   }
   // point
   ctx.strokeStyle = "#cfd3d8"; ctx.lineWidth = 1.2*S*k;
@@ -347,14 +348,18 @@ function drawDart(px, py, k, col, alpha=1, stuck=true){
   ctx.strokeStyle = "#1b1b1d"; ctx.lineWidth = 1.9*S*k;
   ctx.beginPath(); ctx.moveTo(...P(.53,0)); ctx.lineTo(...P(.8,0)); ctx.stroke();
   // flights
-  const fw = 8*S*k;
-  for (const side of [-1,1]){
-    ctx.beginPath(); ctx.moveTo(...P(.66,0)); ctx.lineTo(...P(.82,fw*side)); ctx.lineTo(...P(1,fw*.95*side)); ctx.lineTo(...P(1,0)); ctx.closePath();
+  // flights seen from behind: an X of four wings around the tail
+  const fw = 9*S*k, [tx, ty] = P(1,0);
+  for (const deg of [-135,-45,45,135]){
+    const a = deg*D2R, dx = Math.cos(a), dy = Math.sin(a);
+    ctx.beginPath(); ctx.moveTo(tx, ty);
+    ctx.lineTo(tx + dx*fw, ty + dy*fw);
+    ctx.lineTo(tx + dx*fw*.8 - ux*L*.3, ty + dy*fw*.8 - uy*L*.3);
+    ctx.lineTo(tx - ux*L*.4, ty - uy*L*.4); ctx.closePath();
     ctx.fillStyle = col; ctx.fill();
     ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = .6*S*k; ctx.stroke();
   }
-  ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 1.1*S*k;
-  ctx.beginPath(); ctx.moveTo(...P(.66,0)); ctx.lineTo(...P(1,0)); ctx.stroke();
+  ctx.fillStyle = "#151517"; ctx.beginPath(); ctx.arc(tx, ty, 1.4*S*k, 0, Math.PI*2); ctx.fill();
   ctx.restore();
 }
 
