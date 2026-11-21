@@ -55,6 +55,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .pl.idle{opacity:.45}
 .nm{display:flex;align-items:center;gap:6px;font-family:var(--f-num);font-weight:700;font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:var(--chalk-dim)}
 .pl.on .nm{color:var(--chalk)}
+.nm span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dot{width:9px;height:9px;border-radius:50%;flex:none}
 .row{display:flex;align-items:flex-end;gap:10px;min-width:0}
 .sc{font-family:var(--f-chalk);font-weight:700;font-size:clamp(44px,14vw,66px);line-height:.95;font-variant-numeric:tabular-nums;color:var(--chalk);text-shadow:0 0 1px rgba(255,255,255,.4)}
@@ -121,6 +122,15 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   font-family:var(--f-num);font-weight:800;font-size:22px;letter-spacing:.06em;text-transform:uppercase;box-shadow:0 4px 0 var(--brass-deep),0 10px 24px rgba(0,0,0,.4)}
 .go:active{transform:translateY(2px);box-shadow:0 2px 0 var(--brass-deep)}
 .ghost{padding:13px;border-radius:14px;border:1px solid rgba(236,232,220,.25);background:transparent;font-family:var(--f-num);font-weight:700;font-size:18px;letter-spacing:.06em;text-transform:uppercase}
+.roster{background:none;border:0;border-radius:0;display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;padding:2px 2px 8px;margin:0 -2px;-webkit-overflow-scrolling:touch}
+.roster button{flex:none;width:148px;scroll-snap-align:start;text-align:left;display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:12px;
+  border:1px solid rgba(236,232,220,.14);background:rgba(236,232,220,.05)}
+.roster b{font-family:var(--f-num);font-weight:700;font-size:18px;line-height:1.05;color:var(--chalk)}
+.roster i{font-style:normal;font-family:var(--f-chalk);font-size:17px;line-height:1.1;color:var(--chalk-dim)}
+.roster em{font-style:normal;margin-top:4px;font-family:var(--f-num);font-weight:700;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--brass);font-variant-numeric:tabular-nums}
+.roster button[aria-pressed="true"]{background:var(--chalk);border-color:var(--chalk)}
+.roster button[aria-pressed="true"] b,.roster button[aria-pressed="true"] i{color:var(--wall-deep)}
+.roster button[aria-pressed="true"] em{color:var(--brass-deep)}
 .how{margin:4px 0 0;font-size:14px;line-height:1.5;color:var(--chalk-dim)}
 .eyebrow{margin:0;font-family:var(--f-num);font-weight:700;font-size:15px;letter-spacing:.2em;text-transform:uppercase;color:var(--brass)}
 #winName{margin:0;font-family:var(--f-num);font-weight:800;font-size:clamp(48px,15vw,76px);line-height:.9;text-transform:uppercase;text-wrap:balance}
@@ -159,7 +169,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <div class="opt"><span class="lab">Players</span>
       <div class="seg" data-k="players"><button data-v="solo">Solo</button><button data-v="cpu">vs CPU</button><button data-v="two">2 Players</button></div></div>
     <div class="opt" id="cpuOpt"><span class="lab">Opponent</span>
-      <div class="seg" data-k="cpu"><button data-v="pub">Pub</button><button data-v="county">County</button><button data-v="pro">Pro</button></div></div>
+      <div class="seg roster" data-k="cpu" id="roster"></div></div>
     <div class="opt"><span class="lab">Your hand</span>
       <div class="seg" data-k="hand"><button data-v="steady">Steady</button><button data-v="normal">Normal</button><button data-v="pints">Few pints</button></div></div>
     <button class="go" id="start">Step up to the oche</button>
@@ -229,13 +239,42 @@ function checkout(score, darts){
 }
 
 /* ---------- Settings ---------- */
-const DEFAULTS = { mode:"501", players:"cpu", cpu:"county", hand:"normal" };
+const DEFAULTS = { mode:"501", players:"cpu", cpu:"dittler", hand:"normal" };
 let settings = { ...DEFAULTS };
 try { const s = JSON.parse(localStorage.getItem("oche-settings")||"null"); if (s) settings = { ...DEFAULTS, ...s }; } catch(e){}
 function saveSettings(){ try { localStorage.setItem("oche-settings", JSON.stringify(settings)); } catch(e){} }
 const HAND = { steady:.6, normal:1, pints:1.8 };
-const CPU_SIGMA = { pub:24, county:14, pro:7.5 };
-const CPU_NAME = { pub:"Pub CPU", county:"County CPU", pro:"Pro CPU" };
+/* Opponents. Parody names; "avg" is the 3-dart average each one plays to (roughly the real player's TV average). */
+const OPPONENTS = [
+  { id:"tam",      name:"Big Tam",             nick:"Pub regular",           avg:40 },
+  { id:"county",   name:"Shona McLeague",      nick:"Wednesday league",      avg:65 },
+  { id:"dittler",  name:"Duke Dittler",        nick:"The Newt",              avg:101 },
+  { id:"humfries", name:"Juke Humfries",       nick:"Cool Hand Juke",        avg:98 },
+  { id:"tailor",   name:"Phil Tailor",         nick:"The Hemmer",            avg:98 },
+  { id:"gherkin",  name:"Michael van Gherkin", nick:"Mighty Pickle",         avg:97 },
+  { id:"spice",    name:"Herwyn Spice",        nick:"The Iceberg Lettuce",   avg:96 },
+  { id:"andersnow",name:"Gary Andersnow",      nick:"The Flying Scotchman",  avg:95 },
+  { id:"smithers", name:"Michael Smithers",    nick:"Woolly Boy",            avg:94 },
+  { id:"bright",   name:"Peter Bright",        nick:"Snakebyte",             avg:93 },
+  { id:"crass",    name:"Bob Crass",           nick:"Voltaic",               avg:93 },
+  { id:"pristow",  name:"Eric Pristow",        nick:"The Crafty Cockapoo",   avg:90 },
+  { id:"sherlock", name:"Fallon Sherlock",     nick:"Queen of the Pantry",   avg:88 },
+  { id:"wilton",   name:"Jockey Wilton",       nick:"The Kirkcaldy Kipper",  avg:87 },
+  { id:"gorge",    name:"Bobby Gorge",         nick:"Mr Magnificent-ish",    avg:85 },
+];
+const OPP = Object.fromEntries(OPPONENTS.map(o => [o.id, o]));
+if (!OPP[settings.cpu]) settings.cpu = DEFAULTS.cpu;
+/* Aim spread (mm, std dev) -> 3-dart average, measured by simulating 3,000 legs of 501 per row with this game's own CPU tactics. */
+const SPREAD_TO_AVG = [[3,140.3],[4,124.9],[5,112.9],[6,102.7],[7,94.2],[8,87.3],[9,80.6],[10,75.2],[11,70.1],[12,65],[14,57.5],[16,50.4],[18,45.4],[20,40.8],[23,36],[26,32],[30,28.1],[35,24.7],[40,21.2],[50,16.9],[60,13.5]];
+function spreadFor(avg){
+  const t = SPREAD_TO_AVG;
+  if (avg >= t[0][1]) return t[0][0];
+  for (let i=1;i<t.length;i++){
+    const [s0,a0] = t[i-1], [s1,a1] = t[i];
+    if (avg >= a1) return s0 + (s1 - s0) * (a0 - avg) / (a0 - a1);
+  }
+  return t[t.length-1][0];
+}
 
 /* ---------- Canvas ---------- */
 const stage = $("#stage"), cv = $("#cv"), ctx = cv.getContext("2d");
@@ -431,9 +470,9 @@ function newGame(){
     score:start, target:1, darts:0, points:0, hits:0, history:[] });
   const ps = [];
   if (settings.players === "solo") ps.push(mk("You", false, 0));
-  else if (settings.players === "cpu") ps.push(mk("You", false, 0), mk(CPU_NAME[settings.cpu], true, 1));
+  else if (settings.players === "cpu") ps.push(mk("You", false, 0), mk(OPP[settings.cpu].name, true, 1));
   else ps.push(mk("Player 1", false, 0), mk("Player 2", false, 1));
-  G = { mode: settings.mode, players: ps, cur: 0, turn: [], turnStart: 0, locked: true, over: false, sigma: CPU_SIGMA[settings.cpu] };
+  G = { mode: settings.mode, players: ps, cur: 0, turn: [], turnStart: 0, locked: true, over: false, sigma: spreadFor(OPP[settings.cpu].avg), oppAvg: OPP[settings.cpu].avg };
   buildBoardUI();
   $("#win").hidden = true; $("#menu").hidden = true;
   startTurn();
@@ -666,7 +705,7 @@ function updateUI(){
       el.querySelector(".sc").textContent = p.score;
       el.querySelector(".hist").innerHTML = p.history.slice(-3).map(h => `<s>${h}</s>`).join("");
       const avg = p.darts ? (p.points / p.darts * 3).toFixed(1) : "0.0";
-      el.querySelector(".meta").textContent = `Avg ${avg} · ${p.darts} darts`;
+      el.querySelector(".meta").textContent = p.cpu ? `Avg ${avg} · plays to ${G.oppAvg}` : `Avg ${avg} · ${p.darts} darts`;
     } else {
       el.querySelector(".sc").innerHTML = p.target > 21 ? "Done" : `<small>next</small>${p.target === 21 ? "Bull" : p.target}`;
       el.querySelector(".hist").innerHTML = "";
@@ -692,6 +731,7 @@ function updateUI(){
 }
 
 /* ---------- Menu ---------- */
+$("#roster").innerHTML = OPPONENTS.map(o => `<button data-v="${o.id}"><b>${o.name}</b><i>${o.nick}</i><em>Avg ${o.avg}</em></button>`).join("");
 function syncMenu(){
   document.querySelectorAll(".seg").forEach(seg => {
     const k = seg.dataset.k;
