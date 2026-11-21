@@ -175,6 +175,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
       <div class="seg roster" data-k="cpu" id="roster"></div></div>
     <div class="opt"><span class="lab">Your hand</span>
       <div class="seg" data-k="hand"><button data-v="steady">Steady</button><button data-v="normal">Normal</button><button data-v="pints">Few pints</button></div></div>
+    <div class="opt"><span class="lab">Sound</span>
+      <div class="seg" data-k="sound"><button data-v="off">Off</button><button data-v="darts">Darts</button><button data-v="crowd">+ Crowd</button><button data-v="caller">+ Caller</button></div></div>
     <button class="go" id="start">Step up to the oche</button>
     <button class="ghost" id="resume" hidden>Resume game</button>
     <div class="opt"><span class="lab">Preview celebrations</span>
@@ -520,7 +522,7 @@ function checkout(score, darts){
 }
 
 /* ---------- Settings ---------- */
-const DEFAULTS = { mode:"501", players:"cpu", cpu:"dittler", hand:"normal" };
+const DEFAULTS = { mode:"501", players:"cpu", cpu:"dittler", hand:"normal", sound:"crowd" };
 let settings = { ...DEFAULTS };
 try { const s = JSON.parse(localStorage.getItem("oche-settings")||"null"); if (s) settings = { ...DEFAULTS, ...s }; } catch(e){}
 function saveSettings(){ try { localStorage.setItem("oche-settings", JSON.stringify(settings)); } catch(e){} }
@@ -700,37 +702,193 @@ function drawReticle(px, py, col, fx, fy){
   ctx.restore();
 }
 
-/* ---------- Audio + haptics ---------- */
-let AC = null;
+/* ---------- Audio: everything synthesised live with Web Audio ---------- */
+let AC = null, OUT = null, DRY = null, VERB = null, WHITE = null, PINK = null;
+const soundLevel = () => ({ off:0, darts:1, crowd:2, caller:3 })[settings.sound] ?? 2;
 function audioOn(){
-  try { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === "suspended") AC.resume(); } catch(e){ AC = null; }
-}
-function thunk(miss){
-  if (!AC) return;
   try {
-    const t = AC.currentTime, len = .12, buf = AC.createBuffer(1, Math.floor(AC.sampleRate*len), AC.sampleRate), d = buf.getChannelData(0);
-    for (let i=0;i<d.length;i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/d.length, 4);
-    const src = AC.createBufferSource(); src.buffer = buf;
-    const f = AC.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = miss ? 450 : 2200;
-    const g = AC.createGain(); g.gain.value = miss ? .5 : .7;
-    src.connect(f).connect(g).connect(AC.destination); src.start(t);
+    if (!AC){
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+      OUT = AC.createGain(); OUT.gain.value = 1.25; OUT.connect(comp).connect(AC.destination);
+      DRY = AC.createGain(); DRY.connect(OUT);
+      // pub room: a short synthetic reverb tail
+      VERB = AC.createConvolver();
+      const len = Math.floor(AC.sampleRate*1.6), ir = AC.createBuffer(2, len, AC.sampleRate);
+      for (let c=0;c<2;c++){ const d = ir.getChannelData(c); for (let i=0;i<len;i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 3.2); }
+      VERB.buffer = ir; const vg = AC.createGain(); vg.gain.value = .32; VERB.connect(vg).connect(OUT);
+      const mk = (secs, pink) => {
+        const b = AC.createBuffer(1, Math.floor(AC.sampleRate*secs), AC.sampleRate), d = b.getChannelData(0);
+        let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0;
+        for (let i=0;i<d.length;i++){
+          const w = Math.random()*2-1;
+          if (!pink){ d[i] = w; continue; }
+          b0=.99886*b0+w*.0555179; b1=.99332*b1+w*.0750759; b2=.969*b2+w*.153852; b3=.8665*b3+w*.3104856; b4=.55*b4+w*.5329522; b5=-.7616*b5-w*.016898;
+          d[i] = (b0+b1+b2+b3+b4+b5+w*.5362)*.11;
+        }
+        return b;
+      };
+      WHITE = mk(2, false); PINK = mk(4, true);
+    }
+    if (AC.state === "suspended") AC.resume();
+  } catch(e){ AC = null; }
+}
+const rr = (a, b) => a + Math.random()*(b - a);
+function bus(pan = 0, wet = .3){
+  const g = AC.createGain(), p = AC.createStereoPanner ? AC.createStereoPanner() : null;
+  if (p){ p.pan.value = pan; g.connect(p); p.connect(DRY); if (wet) { const s = AC.createGain(); s.gain.value = wet; p.connect(s).connect(VERB); } }
+  else { g.connect(DRY); if (wet) g.connect(VERB); }
+  return g;
+}
+function noise(t, dur, out, { pink=false, type="bandpass", f=1000, q=1, peak=1, attack=.002, curve="exp" } = {}){
+  const s = AC.createBufferSource(); s.buffer = pink ? PINK : WHITE; s.loop = true;
+  const fl = AC.createBiquadFilter(); fl.type = type; fl.frequency.value = f; fl.Q.value = q;
+  const g = AC.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + attack);
+  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  s.connect(fl).connect(g).connect(out); s.start(t, Math.random()); s.stop(t + dur + .05);
+  return { s, fl, g };
+}
+
+/* The dart hitting sisal: a sharp tip click, a woody "thock", a low body thump and the board shifting on its bracket. */
+function thunk(hit){
+  if (!AC || soundLevel() < 1) return;
+  try {
+    const t = AC.currentTime + .005, miss = hit.v === 0, out = bus(rr(-.15,.15), .18), v = rr(.9, 1.1);
+    if (!miss) noise(t, .012, out, { type:"highpass", f:3000, peak:1 });
+    noise(t, miss ? .09 : .075, out, { f: (miss ? 380 : 900)*v, q: 2.5, peak: miss ? 1.2 : 1.9 });
     const o = AC.createOscillator(), og = AC.createGain();
-    o.frequency.setValueAtTime(miss ? 90 : 170, t); o.frequency.exponentialRampToValueAtTime(55, t+.12);
-    og.gain.setValueAtTime(.45, t); og.gain.exponentialRampToValueAtTime(.001, t+.16);
-    o.connect(og).connect(AC.destination); o.start(t); o.stop(t+.17);
+    o.frequency.setValueAtTime((miss ? 95 : 150)*v, t); o.frequency.exponentialRampToValueAtTime(55, t + .11);
+    og.gain.setValueAtTime(.0001, t); og.gain.exponentialRampToValueAtTime(miss ? 1.4 : 2.2, t + .003); og.gain.exponentialRampToValueAtTime(.0001, t + .16);
+    o.connect(og).connect(out); o.start(t); o.stop(t + .18);
+    noise(t + .004, .22, out, { f: 210*v, q: 6, peak: .35 });
   } catch(e){}
 }
-function fanfare(){
-  if (!AC) return;
+function whoosh(){
+  if (!AC || soundLevel() < 1) return;
   try {
-    [523,659,784,1047].forEach((fq,i) => {
-      const t = AC.currentTime + i*.11, o = AC.createOscillator(), g = AC.createGain();
-      o.type = "triangle"; o.frequency.value = fq;
-      g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.25,t+.02); g.gain.exponentialRampToValueAtTime(.001,t+.5);
-      o.connect(g).connect(AC.destination); o.start(t); o.stop(t+.55);
-    });
+    const t = AC.currentTime, n = noise(t, .3, bus(0, .05), { f:700, q:1.2, peak:.12, attack:.2 });
+    n.fl.frequency.exponentialRampToValueAtTime(2600, t + .28);
   } catch(e){}
 }
+
+/* One crowd member. Sawtooth "vocal cords" through three formant filters, with a pitch contour per shout type. */
+const VOWELS = { ah:[800,1200,2500], oo:[320,870,2240], oh:[500,900,2400], eh:[560,1800,2500], ay:[650,1700,2600] };
+function voice(t, kind, loud){
+  const female = Math.random() < .35, f0 = female ? rr(210, 300) : rr(105, 170), dur = kind === "whoop" ? rr(.6, 1.1) : kind === "groan" ? rr(.8, 1.3) : rr(.9, 1.6);
+  const out = bus(rr(-.85, .85), .45), src = AC.createOscillator(); src.type = "sawtooth";
+  const lfo = AC.createOscillator(), lg = AC.createGain(); lfo.frequency.value = rr(4.5, 6.5); lg.gain.value = f0*.03; lfo.connect(lg).connect(src.frequency);
+  const fq = src.frequency;
+  if (kind === "whoop"){ fq.setValueAtTime(f0, t); fq.exponentialRampToValueAtTime(f0*rr(1.8, 2.3), t + dur*.45); fq.exponentialRampToValueAtTime(f0*1.4, t + dur); }
+  else if (kind === "groan"){ fq.setValueAtTime(f0*1.35, t); fq.exponentialRampToValueAtTime(f0*.75, t + dur); }
+  else { fq.setValueAtTime(f0*1.25, t); fq.exponentialRampToValueAtTime(f0*1.5, t + .15); fq.exponentialRampToValueAtTime(f0*1.05, t + dur); }
+  const v0 = VOWELS[kind === "whoop" ? "oo" : kind === "groan" ? "oh" : (Math.random() < .5 ? "eh" : "ay")];
+  const v1 = VOWELS[kind === "groan" ? "oo" : "ah"];
+  const amp = AC.createGain();
+  amp.gain.setValueAtTime(.0001, t); amp.gain.exponentialRampToValueAtTime(loud, t + .06);
+  amp.gain.setValueAtTime(loud, t + dur*.7); amp.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  [1, .5, .25].forEach((lvl, k) => {
+    const bp = AC.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = k ? 8 : 5;
+    bp.frequency.setValueAtTime(v0[k], t); bp.frequency.linearRampToValueAtTime(v1[k], t + Math.min(.35, dur*.5));
+    const g = AC.createGain(); g.gain.value = lvl * 3;
+    src.connect(bp).connect(g).connect(amp);
+  });
+  amp.connect(out);
+  src.start(t); lfo.start(t); src.stop(t + dur + .05); lfo.stop(t + dur + .05);
+}
+function laugh(t, loud){
+  const f0 = rr(150, 260), out = bus(rr(-.8,.8), .4), n = 4 + (Math.random()*3|0);
+  for (let i=0;i<n;i++){
+    const s = t + i*.17, o = AC.createOscillator(), bp = AC.createBiquadFilter(), g = AC.createGain();
+    o.type = "sawtooth"; o.frequency.setValueAtTime(f0*(1.25 - i*.04), s); o.frequency.exponentialRampToValueAtTime(f0*(1.05 - i*.04), s + .12);
+    bp.type = "bandpass"; bp.frequency.value = 900; bp.Q.value = 3;
+    g.gain.setValueAtTime(.0001, s); g.gain.exponentialRampToValueAtTime(loud*2, s + .02); g.gain.exponentialRampToValueAtTime(.0001, s + .13);
+    o.connect(bp).connect(g).connect(out); o.start(s); o.stop(s + .15);
+  }
+}
+function roar(t, dur, peak){
+  const out = bus(0, .5);
+  [[700, 1.4, 1], [1150, 2.5, .6], [2400, 3, .25]].forEach(([f, q, l]) => {
+    const n = noise(t, dur, out, { pink:true, f, q, peak: peak*l, attack: Math.min(.45, dur*.2) });
+    n.g.gain.cancelScheduledValues(t);
+    n.g.gain.setValueAtTime(.0001, t); n.g.gain.exponentialRampToValueAtTime(peak*l, t + .35);
+    n.g.gain.setValueAtTime(peak*l, t + dur*.45); n.g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+  });
+}
+function applause(t, dur, perSec, loud){
+  const total = Math.round(perSec*dur);
+  for (let i=0;i<total;i++){
+    const x = Math.pow(Math.random(), 1.6), s = t + x*dur, fade = 1 - x*.8;
+    noise(s, rr(.012, .03), bus(rr(-.9,.9), .35), { f: rr(900, 2400), q: rr(.8, 2), peak: loud*fade*rr(.4, 1) });
+  }
+}
+function whistle(t){
+  const o = AC.createOscillator(), g = AC.createGain(), out = bus(rr(-.7,.7), .35), b = rr(1700, 2100);
+  o.type = "sine";
+  o.frequency.setValueAtTime(b, t); o.frequency.exponentialRampToValueAtTime(b*1.7, t + .22);
+  o.frequency.setValueAtTime(b*.95, t + .38); o.frequency.exponentialRampToValueAtTime(b*1.75, t + .55); o.frequency.exponentialRampToValueAtTime(b*.8, t + .95);
+  g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.18, t + .04); g.gain.setValueAtTime(.18, t + .26);
+  g.gain.exponentialRampToValueAtTime(.01, t + .33); g.gain.exponentialRampToValueAtTime(.18, t + .42); g.gain.exponentialRampToValueAtTime(.0001, t + .98);
+  o.connect(g).connect(out); o.start(t); o.stop(t + 1);
+}
+
+/* Crowd reaction scaled to the visit. kind: a number (turn total), "bust" or "game". */
+function react(kind){
+  if (!AC || soundLevel() < 2) return;
+  try {
+    const t = AC.currentTime + .05;
+    const shouts = (n, spread, loud, k = "yeah") => { for (let i=0;i<n;i++) voice(t + rr(0, spread), Math.random() < .45 ? "whoop" : k, loud*rr(.6, 1)); };
+    if (kind === "bust"){
+      for (let i=0;i<10;i++) voice(t + rr(0, .25), "groan", rr(.025, .05));
+      roar(t, 1.4, .05);
+      for (let i=0;i<2;i++) laugh(t + rr(.6, 1.1), .02);
+      return;
+    }
+    if (kind === "game"){
+      roar(t, 4.5, .3); shouts(30, 1.4, .045); applause(t + .2, 5, 80, .5);
+      for (let i=0;i<3;i++) whistle(t + rr(.3, 2.2));
+      return;
+    }
+    const s = kind;
+    if (s === 0){ for (let i=0;i<4;i++) voice(t + rr(0,.3), "groan", .02); return; }
+    if (s < 60) return;
+    if (s < 100){ applause(t, 1.4, 14, .3); return; }
+    if (s < 140){ roar(t, 2.2, .2); shouts(11, .6, .045); applause(t + .3, 2.6, 35, .4); return; }
+    if (s < 180){ roar(t, 3, .22); shouts(18, .9, .045); applause(t + .3, 3.6, 55, .45); whistle(t + rr(.3, 1)); return; }
+    // 180: the place erupts, then a second wave
+    roar(t, 5, .38); shouts(26, .8, .05); shouts(18, 1, .045);
+    setTimeout(() => { if (AC) { const t2 = AC.currentTime; for (let i=0;i<16;i++) voice(t2 + rr(0, .8), Math.random() < .6 ? "whoop" : "yeah", rr(.03, .05)); } }, 1300);
+    applause(t + .2, 5.5, 95, .55);
+    for (let i=0;i<4;i++) whistle(t + rr(.2, 2.8));
+  } catch(e){}
+}
+
+/* The caller, using the phone's own text-to-speech voice. */
+let callerVoice = null;
+function pickVoice(){
+  try {
+    const vs = speechSynthesis.getVoices();
+    callerVoice = vs.find(v => /en-GB/i.test(v.lang) && /male|daniel|arthur|george|oliver/i.test(v.name)) || vs.find(v => /en-GB/i.test(v.lang)) || vs.find(v => /^en/i.test(v.lang)) || null;
+  } catch(e){}
+}
+try { pickVoice(); speechSynthesis.addEventListener("voiceschanged", pickVoice); } catch(e){}
+function call(text, slow){
+  if (soundLevel() < 3) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    if (callerVoice) u.voice = callerVoice;
+    u.lang = callerVoice ? callerVoice.lang : "en-GB"; u.rate = slow ? .72 : .9; u.pitch = .75; u.volume = 1;
+    speechSynthesis.speak(u);
+  } catch(e){}
+}
+function callScore(total){
+  if (total === 180) call("One hundred... and eight-yyyy!", true);
+  else if (total === 0) call("No score");
+  else call(String(total), total >= 100);
+}
+function fanfare(){}
+
+/* ---------- Haptics ---------- */
 function buzz(ms){ try { navigator.vibrate && navigator.vibrate(ms); } catch(e){} }
 
 /* ---------- Game state ---------- */
@@ -772,13 +930,14 @@ function throwDart(ax, ay, sigma){
   G.locked = true;
   flight = { sx: CX + (tx-CX)*.25, sy: H + 40, tx, ty, t0: performance.now(), dur: 300, x, y, col: cur().raw };
   hideHint();
+  whoosh();
 }
 
 function land(f){
   const p = cur(), hit = scoreAt(f.x, f.y);
   G.turn.push({ x:f.x, y:f.y, hit, col:f.col });
   p.darts++;
-  thunk(hit.v === 0); buzz(hit.v === 0 ? 8 : 18);
+  thunk(hit); buzz(hit.v === 0 ? 8 : 18);
   if (hit.v) shake = 1;
   { const [vx, vy] = toViewport(f.x, f.y); window.FX.land(vx, vy, hit); }
   let ended = false, bust = false, won = false;
@@ -816,6 +975,8 @@ function endTurn(bust){
     else if (total >= 100) callout(String(total), "Ton" + (total > 100 ? " plus" : ""));
     else if (total === 0) callout("No score", "");
     else callout(String(total), "");
+    react(bust ? "bust" : total);
+    if (bust) call("Bust"); else callScore(total);
   }
   updateUI();
   const tk = token;
@@ -833,7 +994,7 @@ function finish(p){
   if (isX01()){ p.points += total; callout("Game shot", G.turn.at(-1).hit.label + " out"); }
   else callout("Bull!", "Round the board");
   celebrateTurn(Math.max(140, total));
-  fanfare(); buzz([30,50,30,50,30]);
+  react("game"); call("Game shot, and the leg!", true); buzz([30,50,30,50,30]);
   const tk = token;
   setTimeout(() => {
     if (tk !== token) return;
@@ -1043,6 +1204,7 @@ $("#preview").addEventListener("click", e => {
   setTimeout(() => {
     if (t === 180){ callout(NAMES[180], "", "max"); fanfare(); buzz([40,60,40,60,120]); }
     else callout(String(t), t > 100 ? "Ton plus" : "Ton");
+    react(t); callScore(t);
     celebrateTurn(t);
   }, 150);
 });
