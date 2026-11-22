@@ -70,6 +70,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 /* Stage */
 #stage{position:relative;flex:1;min-height:0;touch-action:none;overflow:hidden;
   background:
+    radial-gradient(70% 45% at 50% -6%, rgba(255,232,190,.13), transparent 70%),
     radial-gradient(closest-side at 50% 48%, rgba(212,166,79,.10), transparent 75%),
     radial-gradient(140% 100% at 50% 40%, var(--wall) 0%, var(--wall-deep) 100%)}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block}
@@ -733,6 +734,26 @@ function drawDart(px, py, k, col, alpha=1, stuck=true){
   ctx.restore();
 }
 
+/* Shadow cast by the lamp above the oche. z = distance from the board (1 = just thrown, 0 = landed).
+   Far away it is low, wide and faint; it slides up and sharpens until it meets the tip on impact. */
+function drawFlightShadow(px, tx, ty, z){
+  const sx = tx + (px - tx)*.3, sy = ty + z*R.dOut*S*.8;
+  const len = (34 + 46*z)*S, wid = (7 + 18*z)*S, a = .72 - .38*z;
+  ctx.save();
+  ctx.translate(sx, sy + len*.5);
+  ctx.scale(wid/len, 1);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, len*.5);
+  g.addColorStop(0, `rgba(0,0,0,${a})`); g.addColorStop(.55, `rgba(0,0,0,${a*.55})`); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, len*.5, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  if (z < .5){
+    const k = 1 - z*2;
+    ctx.save(); ctx.lineCap = "round";
+    ctx.strokeStyle = `rgba(0,0,0,${.35*k})`; ctx.lineWidth = 2.4*S;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 1.5*S, sy + len*.75); ctx.stroke();
+    ctx.restore();
+  }
+}
 function drawReticle(px, py, col, fx, fy){
   ctx.save();
   if (fx !== undefined){
@@ -946,6 +967,7 @@ let cpuAim = null;       // {fx,fy,tx,ty,t0,dur}
 let flight = null;       // {sx,sy,tx,ty,t0,dur,hit,x,y,col}
 let pops = [];           // floating labels
 let shake = 0;
+let thud = null;         // board shudder after a hit {t0, k, side}
 const gauss = () => { let u=0,v=0; while(!u) u=Math.random(); while(!v) v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
 const cur = () => G.players[G.cur];
 const isX01 = () => G.mode !== "atc";
@@ -982,7 +1004,7 @@ function throwDart(ax, ay, sigma){
   const x = ax + gauss()*sigma, y = ay + gauss()*sigma;
   const [tx, ty] = toPx(x, y);
   G.locked = true;
-  flight = { sx: CX + (tx-CX)*.25, sy: H + 40, tx, ty, t0: performance.now(), dur: 300, x, y, col: cur().raw };
+  flight = { sx: CX + (tx-CX)*.25, sy: H + 40, tx, ty, t0: performance.now(), dur: 380, x, y, col: cur().raw };
   hideHint();
   whoosh();
 }
@@ -992,7 +1014,7 @@ function land(f){
   G.turn.push({ x:f.x, y:f.y, hit, col:f.col });
   p.darts++;
   thunk(hit); buzz(hit.v === 0 ? 8 : 18);
-  if (hit.v) shake = 1;
+  if (!reduceMotion) thud = { t0: performance.now(), k: hit.v === 0 ? .25 : hit.v === 50 ? 1.7 : hit.m >= 2 ? 1.3 : 1, side: Math.max(-1, Math.min(1, f.x / R.dOut)) };
   { const [vx, vy] = toViewport(f.x, f.y); window.FX.land(vx, vy, hit); }
   let ended = false, bust = false, won = false;
 
@@ -1175,14 +1197,29 @@ function frame(now){
   ctx.clearRect(0,0,W,H);
   let ox = 0, oy = 0;
   if (shake > 0 && !reduceMotion){ ox = (Math.random()-.5)*3*shake; oy = (Math.random()-.5)*3*shake; shake = Math.max(0, shake - .12); }
-  if (boardImg) ctx.drawImage(boardImg, CX - boardHalf + ox, CY - boardHalf + oy, boardHalf*2, boardHalf*2);
-
-  if (G) for (const d of G.turn){ const [px, py] = toPx(d.x, d.y); drawDart(px + ox, py + oy, 1, d.col); }
+  // Shudder: the hit knocks the board back on its bracket, then it rocks and settles (a damped ~13 Hz wobble).
+  let rot = 0, bob = 0, sc = 1;
+  if (thud){
+    const t = (now - thud.t0)/1000;
+    if (t > .5) thud = null;
+    else {
+      const env = thud.k * Math.exp(-t/.11), osc = Math.sin(2*Math.PI*13*t);
+      rot = osc * env * .0045 * (thud.side || .3);
+      bob = osc * env * 1.6;
+      sc = 1 - env * .007 * Math.exp(-t/.03);
+    }
+  }
+  ctx.save();
+  ctx.translate(CX + ox, CY + oy + bob); ctx.rotate(rot); ctx.scale(sc, sc); ctx.translate(-CX, -CY);
+  if (boardImg) ctx.drawImage(boardImg, CX - boardHalf, CY - boardHalf, boardHalf*2, boardHalf*2);
+  if (G) for (const d of G.turn){ const [px, py] = toPx(d.x, d.y); drawDart(px, py, 1, d.col); }
+  ctx.restore();
 
   if (flight){
     const t = Math.min(1, (now - flight.t0) / flight.dur), e = 1 - Math.pow(1 - t, 2.2);
     const px = flight.sx + (flight.tx - flight.sx)*e;
     const py = flight.sy + (flight.ty - flight.sy)*e - Math.sin(Math.PI*e)*H*.1;
+    drawFlightShadow(px, flight.tx, flight.ty, 1 - e);
     drawDart(px, py, 1 + (1 - e)*2.2, flight.col, Math.min(1, t*4), false);
     if (t >= 1){ const f = flight; flight = null; land(f); }
   }
