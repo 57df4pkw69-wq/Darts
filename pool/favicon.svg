@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Max's pool challenge">
+  <rect width="32" height="32" rx="7" fill="#2C1E15"/>
+  <circle cx="16" cy="16.5" r="10.5" fill="#1F6B45"/>
+  <circle cx="16" cy="16.5" r="9.2" fill="none" stroke="#E0A85C" stroke-width="1.4"/>
+  <circle cx="16" cy="16.5" r="3.6" fill="#F4EAD7"/>
+  <rect x="6" y="5.2" width="20" height="2.2" rx="1.1" fill="#E0A85C"/>
+</svg>
