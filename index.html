@@ -120,6 +120,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .seg{display:flex;gap:4px;padding:4px;border-radius:12px;background:rgba(236,232,220,.06);border:1px solid rgba(236,232,220,.1)}
 .seg button{flex:1;min-width:0;padding:10px 6px;border:0;border-radius:9px;background:transparent;font-family:var(--f-num);font-weight:700;font-size:17px;letter-spacing:.03em;color:var(--chalk-dim)}
 .seg button[aria-pressed="true"]{background:var(--chalk);color:var(--wall-deep)}
+.pub-link{flex:1;display:block;text-align:center;padding:10px 12px;border-radius:10px;color:var(--brass);text-decoration:none;font-weight:600}
 .go{margin-top:8px;padding:16px;border:0;border-radius:14px;background:linear-gradient(#e2b960,#b88b38);color:#1b1206;
   font-family:var(--f-num);font-weight:800;font-size:22px;letter-spacing:.06em;text-transform:uppercase;box-shadow:0 4px 0 var(--brass-deep),0 10px 24px rgba(0,0,0,.4)}
 .go:active{transform:translateY(2px);box-shadow:0 2px 0 var(--brass-deep)}
@@ -204,6 +205,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <button class="ghost" id="resume" hidden>Resume game</button>
     <div class="opt"><span class="lab">Preview celebrations</span>
       <div class="seg" id="preview"><button data-t="100">Ton</button><button data-t="140">140</button><button data-t="180">180</button></div></div>
+    <div class="opt"><span class="lab">Also at the pub</span>
+      <div class="seg"><a class="pub-link" href="pool/">Max's pool challenge</a></div></div>
     <p class="how">Press and hold anywhere on the board area. The aiming ring floats above your thumb and drifts like a real hand, and it gets shakier the longer you hold. Let go to throw. 501 and 301 must finish on a double or the bull.</p>
   </div>
 </section>
