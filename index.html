@@ -195,6 +195,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
       <div class="seg roster" data-k="cpu" id="roster"></div></div>
     <div class="opt"><span class="lab">Your hand</span>
       <div class="seg" data-k="hand"><button data-v="steady">Steady</button><button data-v="normal">Normal</button><button data-v="pints">Few pints</button></div></div>
+    <div class="opt"><span class="lab">Throwing</span>
+      <div class="seg" data-k="throw"><button data-v="aim">Aim only</button><button data-v="meter">Aim + timing</button></div></div>
     <div class="opt"><span class="lab">Sound</span>
       <div class="seg" data-k="sound"><button data-v="off">Off</button><button data-v="darts">Darts</button><button data-v="crowd">+ Crowd</button><button data-v="caller">+ Caller</button></div></div>
     <div class="opt" id="lenOpt"><span class="lab">Length</span>
@@ -204,7 +206,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <button class="ghost" id="resume" hidden>Resume game</button>
     <div class="opt"><span class="lab">Preview celebrations</span>
       <div class="seg" id="preview"><button data-t="100">Ton</button><button data-t="140">140</button><button data-t="180">180</button></div></div>
-    <p class="how">Press and hold anywhere on the board area. The aiming ring floats above your thumb and drifts like a real hand, and it gets shakier the longer you hold. Let go to throw. 501 and 301 must finish on a double or the bull.</p>
+    <p class="how">Press and hold anywhere on the board area. The aiming ring floats above your thumb and drifts like a real hand, and it gets shakier the longer you hold. Let go to lock your aim. With timing on, a bar then appears beside the ring: tap when the sweeping line crosses the green. Above the green is too much power and the dart flies high; below is too little and it drops. 501 and 301 must finish on a double or the bull.</p>
   </div>
 </section>
 
@@ -571,7 +573,7 @@ function checkout(score, darts){
 }
 
 /* ---------- Settings ---------- */
-const DEFAULTS = { mode:"501", players:"cpu", cpu:"dittler", hand:"normal", sound:"crowd", length:"leg", tsize:"8", thumans:"1" };
+const DEFAULTS = { mode:"501", players:"cpu", cpu:"dittler", hand:"normal", sound:"crowd", length:"leg", tsize:"8", thumans:"1", throw:"meter" };
 let settings = { ...DEFAULTS };
 try { const s = JSON.parse(localStorage.getItem("oche-settings")||"null"); if (s) settings = { ...DEFAULTS, ...s }; } catch(e){}
 function saveSettings(){ try { localStorage.setItem("oche-settings", JSON.stringify(settings)); } catch(e){} }
@@ -981,7 +983,7 @@ function newGame(){
   startMatch({ mode: settings.mode, players: ps, match: settings.length === "match" && ps.length > 1 && settings.mode !== "atc" });
 }
 function startMatch(spec){
-  token++; aim = null; cpuAim = null; flight = null;
+  token++; aim = null; cpuAim = null; flight = null; meter = null;
   const start = spec.mode === "atc" ? 1 : Number(spec.mode);
   const players = spec.players.map((q, i) => ({ name: q.name, cpu: !!q.cpu, avg: q.avg || 0, sigma: q.cpu ? spreadFor(q.avg) : 0,
     col: i===0 ? "var(--p1)" : "var(--p2)", raw: i===0 ? "#e8483b" : "#3fa7f2",
@@ -1149,8 +1151,82 @@ function aimMm(now){
 }
 const canThrow = () => G && !G.over && !G.locked && !flight && !cur().cpu && G.turn.length < 3 && [...document.querySelectorAll(".sheet")].every(el => el.hidden);
 function local(e){ const r = stage.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+/* Timing meter: a line sweeps up and down a bar; tap to stop it. Green = clean release.
+   Above the green is too much power (dart flies high), below is too little (it drops low). */
+let meter = null, meterResult = null, meterThrows = 0;
+const METER = { steady:{ period:1350, g:.17 }, normal:{ period:1000, g:.12 }, pints:{ period:820, g:.085 } };
+function meterU(now){
+  const t = (now - meter.t0) / meter.period;
+  const ph = (settings.hand === "pints" ? t + .07*Math.sin(t*5.3) : t) % 1;
+  const tri = ph < .5 ? ph*2 : 2 - ph*2;
+  return tri*2 - 1;                       // -1 bottom (soft) … +1 top (hard)
+}
+function startMeter(ax, ay){
+  const m = METER[settings.hand] || METER.normal;
+  meter = { ax, ay, t0: performance.now(), period: m.period, g: m.g };
+  if (meterThrows < 3) showHint("Tap when the line crosses the green");
+}
+function stopMeter(now){
+  const u = meterU(now), g = meter.g, a = Math.abs(u), hand = HAND[settings.hand];
+  let dy, sigma, text, col;
+  if (a <= g){
+    dy = u * 6; sigma = 1.6 * hand;
+    if (a < g*.4){ text = "Perfect"; col = "#7fe0a0"; } else { text = "Good"; col = "#c8e6a0"; }
+  } else {
+    const ex = a - g;
+    dy = Math.sign(u) * (g*6 + ex*75); sigma = (2.2 + ex*26) * hand;
+    text = u > 0 ? "Too hard" : "Too soft"; col = ex > .35 ? "#e8483b" : "#d4a64f";
+  }
+  const { ax, ay } = meter;
+  meterResult = { text, col, t0: now, bx: meter.bx, by: meter.by };
+  meter = null; meterThrows++;
+  throwDart(ax, ay - dy, sigma);
+}
+function rrect(x, y, w, h, r){ ctx.beginPath(); ctx.moveTo(x+r, y); ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r); ctx.arcTo(x, y+h, x, y, r); ctx.arcTo(x, y, x+w, y, r); ctx.closePath(); }
+function drawMeter(now){
+  const [rx, ry] = toPx(meter.ax, meter.ay);
+  drawReticle(rx, ry, "#d4a64f");
+  const h = Math.min(170, H*.36), w = 18;
+  let bx = rx + 40; if (bx + w > W - 12) bx = rx - 40 - w;
+  const by = Math.max(h/2 + 14, Math.min(H - h/2 - 14, ry));
+  meter.bx = bx; meter.by = by;
+  const top = by - h/2;
+  ctx.save();
+  ctx.fillStyle = "rgba(10,17,14,.88)"; rrect(bx - 5, top - 5, w + 10, h + 10, 10); ctx.fill();
+  ctx.strokeStyle = "rgba(212,166,79,.7)"; ctx.lineWidth = 1.5; ctx.stroke();
+  const gr = ctx.createLinearGradient(0, top, 0, top + h);
+  gr.addColorStop(0, "#b8352c"); gr.addColorStop(.3, "#a8782c"); gr.addColorStop(.5, "#2f5a3c"); gr.addColorStop(.7, "#a8782c"); gr.addColorStop(1, "#b8352c");
+  ctx.fillStyle = gr; rrect(bx, top, w, h, 6); ctx.fill();
+  const gh = meter.g * h;
+  ctx.shadowColor = "rgba(62,207,116,.8)"; ctx.shadowBlur = 10;
+  ctx.fillStyle = "#3ecf74"; ctx.fillRect(bx, by - gh/2, w, gh);
+  ctx.shadowBlur = 0;
+  const my = by - meterU(now) * h/2;
+  ctx.fillStyle = "#f4f1e8"; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 1;
+  ctx.fillRect(bx - 6, my - 1.5, w + 12, 3); ctx.strokeRect(bx - 6, my - 1.5, w + 12, 3);
+  ctx.beginPath(); ctx.moveTo(bx - 7, my); ctx.lineTo(bx - 14, my - 6); ctx.lineTo(bx - 14, my + 6); ctx.closePath(); ctx.fill();
+  ctx.font = `700 11px "Barlow Condensed",sans-serif`; ctx.textAlign = "center"; ctx.fillStyle = "rgba(236,232,220,.75)";
+  ctx.fillText("HARD", bx + w/2, top - 11); ctx.fillText("SOFT", bx + w/2, top + h + 19);
+  ctx.restore();
+}
+function drawMeterResult(now){
+  const t = (now - meterResult.t0)/800;
+  if (t >= 1){ meterResult = null; return; }
+  ctx.save(); ctx.globalAlpha = t < .6 ? 1 : 1 - (t - .6)/.4;
+  ctx.font = `800 20px "Barlow Condensed",sans-serif`; ctx.textAlign = "center"; ctx.lineJoin = "round";
+  ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,.75)";
+  const x = Math.max(40, Math.min(W - 40, meterResult.bx + 9)), y = meterResult.by - 6 - t*14;
+  ctx.strokeText(meterResult.text.toUpperCase(), x, y); ctx.fillStyle = meterResult.col; ctx.fillText(meterResult.text.toUpperCase(), x, y);
+  ctx.restore();
+}
+
 stage.addEventListener("pointerdown", e => {
   audioOn();
+  if (meter){
+    e.preventDefault();
+    if (canThrow()) stopMeter(performance.now());
+    return;
+  }
   if (!canThrow() || aim) return;
   e.preventDefault();
   try { stage.setPointerCapture(e.pointerId); } catch(_){}
@@ -1166,7 +1242,9 @@ stage.addEventListener("pointerup", e => {
   const [x, y] = local(e); aim.fx = x; aim.fy = y;
   const [ax, ay] = aimMm(performance.now());
   aim = null;
-  if (canThrow()) throwDart(ax, ay, 2.4 * HAND[settings.hand]);
+  if (!canThrow()) return;
+  if (settings.throw === "aim") throwDart(ax, ay, 2.4 * HAND[settings.hand]);
+  else startMeter(ax, ay);
 });
 stage.addEventListener("pointercancel", () => { aim = null; });
 stage.addEventListener("contextmenu", e => e.preventDefault());
@@ -1190,6 +1268,7 @@ function callout(big, small, cls=""){
 }
 let hintShown = true;
 function hideHint(){ if (hintShown){ hintShown = false; $("#hint").classList.add("gone"); } }
+function showHint(text){ $("#hint").textContent = text; $("#hint").classList.remove("gone"); hintShown = true; }
 
 /* ---------- Render loop ---------- */
 function frame(now){
@@ -1224,6 +1303,8 @@ function frame(now){
     if (t >= 1){ const f = flight; flight = null; land(f); }
   }
 
+  if (meter) drawMeter(now);
+  if (meterResult) drawMeterResult(now);
   if (aim){
     const [ax, ay] = aimMm(now), [px, py] = toPx(ax, ay);
     drawReticle(px, py, "#d4a64f", aim.fx, aim.fy);
